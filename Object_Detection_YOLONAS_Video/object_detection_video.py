@@ -1,6 +1,5 @@
 
 import cv2
-# import super_gradients
 import torch
 from super_gradients.training import models
 import numpy as np
@@ -8,6 +7,8 @@ import math
 
 # Replace with the correct path to your video file
 cap = cv2.VideoCapture("../Video/airport.mp4")
+frame_width = int(cap.get(3))
+frame_height = int(cap.get(4))
 
 device = torch.device(
     "cuda:0") if torch.cuda.is_available() else torch.device("cpu")
@@ -24,6 +25,7 @@ classNames = ["human", "bicycle", "car", "motorbike", "aeroplane", "bus", "train
               "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
               "scissors", "teddy bear", "hair drier", "toothbrush", "domble"
               ]
+out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (frame_width, frame_height))
 
 while True:
     ret, frame = cap.read()
