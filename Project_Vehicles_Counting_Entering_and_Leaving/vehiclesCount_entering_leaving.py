@@ -1,54 +1,45 @@
 import cv2
 import torch
-from super_gradients.training import models
 import numpy as np
 import math
-from sort import *
+from sort import Sort
 
-# Replace with the correct path to your video file
+# Import YOLO model
+from super_gradients.training import models
+
+# Initialize YOLO model
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model = models.get('yolo_nas_s', pretrained_weights="coco").to(device)
+
+# Initialize video capture
 cap = cv2.VideoCapture("../Video/traffic_highway.mp4")
 frame_width = int(cap.get(3))
 frame_height = int(cap.get(4))
 
-device = torch.device(
-    "cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+# Define lanes and corresponding limits
+limit_up = [644, 413, 1271, 412]
+limit_down = [3, 411, 596, 411]
 
-# Replace 'models.get' with the correct method or function to load the YOLO model
-model = models.get('yolo_nas_s', pretrained_weights="coco").to(device)
-
-
-count = 0
-classNames = ["human", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat", "traffic light", "fire hydrant", "stop sign",
-              "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
-              "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-              "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
-              "brocoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor",
-              "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
-              "scissors", "teddy bear", "hair drier", "toothbrush"
-              ]
-
-out = cv2.VideoWriter('Output.avi', cv2.VideoWriter_fourcc(
-    'M', 'J', 'P', 'G'), 10, (frame_width, frame_height))
-
+# Initialize tracker
 tracker = Sort(max_age=20, min_hits=3, iou_threshold=0.3)
-totalcountup = []
-totalcountdown = []
-# limitdown = [37, 282, 607, 281]
-# limitup = [643, 280, 1139, 280]
-limitup = [644, 413, 1271, 412]
-limitdown = [3, 411, 596, 411]
+
+# Initialize counts
+total_count_up = []
+total_count_down = []
+
+# # Initialize traffic light durations
+# green_light_duration = 10  # in seconds
+# red_light_duration = 5  # in seconds
 
 while True:
     ret, frame = cap.read()
-    count += 1
+
     if ret:
+        # Detect objects using YOLO
         detections = np.empty((0, 5))
         result = list(model.predict(frame, conf=0.35))[0]
-
         bbox_xyxys = result.prediction.bboxes_xyxy.tolist()
-
         confidences = result.prediction.confidence
-
         labels = result.prediction.labels.tolist()
 
         for (bbox_xyxy, confidence, cls) in zip(bbox_xyxys, confidences, labels):
@@ -56,18 +47,21 @@ while True:
             x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             classname = int(cls)
-            class_name = classNames[classname]
             conf = math.ceil((confidence * 100)) / 100
-            currentArray = np.array([x1, y1, x2, y2, conf])
-            detections = np.vstack((detections, currentArray))
-        resultsTracker = tracker.update(detections)
-        cv2.line(frame, (limitup[0], limitup[1]),
-                 (limitup[2], limitup[3]), (255, 0, 0), 5)
-        cv2.line(frame, (limitdown[0], limitdown[1]),
-                 (limitdown[2], limitdown[3]), (255, 0, 0), 5)
-        for result in resultsTracker:
+            current_array = np.array([x1, y1, x2, y2, conf])
+            detections = np.vstack((detections, current_array))
+
+        # Update tracker
+        results_tracker = tracker.update(detections)
+
+        # Draw lane boundaries
+        cv2.line(frame, (limit_up[0], limit_up[1]), (limit_up[2], limit_up[3]), (255, 0, 0), 5)
+        cv2.line(frame, (limit_down[0], limit_down[1]), (limit_down[2], limit_down[3]), (255, 0, 0), 5)
+
+        # Process each tracked object
+        for result in results_tracker:
             if len(result) < 5:
-                print("Unexpected number of values in reslut:", result)
+                print("Unexpected number of values in result:", result)
                 continue
             x1, y1, x2, y2, id = result
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
@@ -81,24 +75,39 @@ while True:
             cv2.rectangle(frame, (x1, y1), c2, [255, 0, 255], -1, cv2.LINE_AA)
             cv2.putText(frame, label, (x1, y1 - 2), 0, 1,
                         [255, 255, 255], thickness=1, lineType=cv2.INTER_AREA)
-            if limitup[0] < cx < limitup[2] and limitup[1] - 15 < cy < limitup[3] + 15:
-                if totalcountup.count(id) == 0:
-                    totalcountup.append(id)
-                    cv2.line(frame, (limitup[0], limitup[1]),
-                             (limitup[2], limitup[3]), (0, 255, 0), 5)
-            if limitdown[0] < cx < limitdown[2] and limitdown[1] - 15 < cy < limitdown[3] + 15:
-                if totalcountdown.count(id) == 0:
-                    totalcountdown.append(id)
-                    cv2.line(frame, (limitdown[0], limitdown[1]),
-                             (limitdown[2], limitdown[3]), (0, 255, 0), 5)
-        cv2.putText(frame, str(len(totalcountup)), (957, 127),
-                    cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 5)
-        cv2.putText(frame, str(len(totalcountdown)), (76, 130),
-                    cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 5)
+
+            # Count vehicles in respective lanes
+            if limit_up[0] < cx < limit_up[2] and limit_up[1] - 15 < cy < limit_up[3] + 15:
+                if result[-1] not in total_count_up:
+                    total_count_up.append(result[-1])
+            elif limit_down[0] < cx < limit_down[2] and limit_down[1] - 15 < cy < limit_down[3] + 15:
+                if result[-1] not in total_count_down:
+                    total_count_down.append(result[-1])
+
+            # Draw object bounding box and ID
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (85, 45, 255), 3)
+            cv2.putText(frame, str(int(result[-1])), (x1, y1 - 2), 0, 1, [255, 255, 255], thickness=1, lineType=cv2.LINE_AA)
+
+        # Control traffic lights based on vehicle count
+        if len(total_count_up) > len(total_count_down):
+            cv2.putText(frame, "Green Light - Up Lane", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, f"Red Light - Down Lane", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        else:
+            cv2.putText(frame, f"Red Light - Up Lane", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(frame, "Green Light - Down Lane", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        # Display vehicle counts
+        cv2.putText(frame, f"Up Lane: {len(total_count_up)}", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(frame, f"Down Lane: {len(total_count_down)}", (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
         cv2.imshow("Frame", frame)
-        if cv2.waitKey(1) & 0xFF == ord('1'):
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+
     else:
         break
 
+# Release video capture and close all windows
+cap.release()
 cv2.destroyAllWindows()
